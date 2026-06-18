@@ -7,10 +7,6 @@ Feedback Unit for Sensing and Extrusion (FUSE) Head
 <p align="center">
 Plan for the FUSE print head</p>
 
-## DAQ Design
-1. This contains the hardware design and code for the DAQ system
-1. Orginized by versions
-
 ## Licensing and Citation
 
 [![CC BY-SA 4.0][cc-by-sa-shield]][cc-by-sa]
@@ -39,7 +35,7 @@ in bibtex
 }
 
 <p align="center">
-<img src="media/QR-code.png" alt="drawing" width="200"/>
+<img src="media/QR-for-ARTS-Laboratory.png" alt="drawing" width="200"/>
 </p>
 <p align="center">
 QR code for repo.
