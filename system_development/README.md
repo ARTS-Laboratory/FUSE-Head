@@ -1,8 +1,8 @@
 # System Development
+Named after duck species native to South Carolina
 
-## V0.1.0
-* 3 pieces
-* more or less in line
+## Pintail
+* Sensor-based print head
 
-## V0.1.1
-* 1 piece frame
+## Bufflehead
+* Camera based print head
