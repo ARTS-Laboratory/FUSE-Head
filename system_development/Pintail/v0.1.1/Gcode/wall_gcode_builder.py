@@ -1,4 +1,5 @@
 # from moonraker_client import MoonrakerClient
+import gscrib
 from gscrib import GCodeBuilder
 import math
 
@@ -24,11 +25,13 @@ def print_rect_in_center(g, d, sensor_data_collection=False):
                 x=center[0] - d[0] / 2,
                 y=center[1] - d[1] / 2 + y,
             )
+            g.wait()
             if (sensor_data_collection):
                 g.rapid(
                     x=g.position[0] - 10
                 )
             g.move(x=g.position[0] + d[0])
+            g.wait()
             if (sensor_data_collection):
                 g.rapid(
                     x=g.position[0] + 10
@@ -43,7 +46,12 @@ def extrude_hook(origin, target, params, state):
 
 g = GCodeBuilder(output="wall.gcode")
 g.write("SET_KINEMATIC_POSITION X=0 Y=0 Z=0")
-# g.add_hook(extrude_hook)
+g.set_fan_speed(255)
+g.set_bed_temperature(60)
+g.halt(gscrib.enums.HaltMode.WAIT_FOR_BED)
+g.set_hotend_temperature(220)
+g.halt(gscrib.enums.HaltMode.WAIT_FOR_HOTEND)
+g.add_hook(extrude_hook)
 print_rect_in_center(g, BASE_DIMENSIONS)
 print_rect_in_center(g, WALL_DIMENSIONS, True)
 g.teardown()
