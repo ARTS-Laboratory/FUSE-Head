@@ -5,7 +5,7 @@ Feedback Unit for Sensing and Extrusion (FUSE) Head
 <img src="media/figure.png" alt="drawing" width="700"/>
 </p>
 <p align="center">
-Plan for the FUSE print head</p>
+FUSE print head</p>
 
 ## Licensing and Citation
 
