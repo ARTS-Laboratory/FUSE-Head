@@ -8,9 +8,9 @@
 ## V0.1.1
 * 1 piece frame
 
-v0.1.2
+## v0.1.2
 * Includes the initial data acquisition labview vi files.
 
-v0.1.3
+## v0.1.3
 * Merged plastic bracket, lightweight.
 * Python gcode generation.
