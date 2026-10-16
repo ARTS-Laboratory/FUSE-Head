@@ -29,13 +29,22 @@ WALL_LAYERS_THICK = 2
 # "positive" means +X (left-to-right) for an X wall, or +Y for a Y wall.
 # "negative" reverses that direction.  Every wall track extrudes only in this
 # direction; all return and cross-wall moves are non-extruding travels.
-WALL_PRINT_DIRECTION = "negative"
+WALL_PRINT_DIRECTION = "positive"
 
-# Build plate dimensions and placement.  An offset of [0, 0] centers the base
-# on a 220 x 220 mm plate.  Positive X/Y moves the entire print accordingly.
-BUILD_PLATE_SIZE_MM = [170, 160]
+# Build plate dimensions and placement. An offset of [0, 0] centers the base
+# on a 220 x 220 mm plate. Positive X/Y moves the entire print accordingly.
+BUILD_PLATE_SIZE_MM = [220.0, 220.0]
 PLACEMENT_OFFSET_X_MM = 0.0
 PLACEMENT_OFFSET_Y_MM = 0.0
+
+# Global scan boundaries. These are absolute machine coordinates, not offsets.
+# They default to the non-negative 0..220 mm plate range. Values must remain
+# inside BUILD_PLATE_SIZE_MM. The scan goes to the closer end first, then
+# sweeps to the opposite end after every wall layer.
+SCAN_X_LEFTMOST_MM = 0.0
+SCAN_X_RIGHTMOST_MM = 220.0
+SCAN_Y_FRONTMOST_MM = 0.0
+SCAN_Y_BACKMOST_MM = 220.0
 
 # Temperatures: M190 waits for the bed and M109 waits for the nozzle.
 BED_TEMPERATURE_C = 60
@@ -55,9 +64,10 @@ TRAVEL_SPEED_MM_S = 150.0
 # non-extruding approach move from rubbing across the previously printed wall.
 WALL_APPROACH_CLEARANCE_MM = 0.5
 
-# A non-extruding scan is made after every wall layer.  It runs parallel to
-# the wall, from one edge of the base to the other, at the current wall-top Z
-# plus this lift.  Set the lift for your scanner/nozzle geometry.
+# A non-extruding scan is made after every wall layer. It runs parallel to the
+# wall at the current wall-top Z plus this lift. Set the lift for your
+# scanner/nozzle geometry. The file does not include G28, so home the printer
+# or otherwise establish its absolute coordinate system before starting it.
 ENABLE_LAYER_SCAN = True
 SCAN_SPEED_MM_S = 15.0
 SCAN_Z_LIFT_MM = 2.0
@@ -185,6 +195,7 @@ def validate_settings():
         ("BASE_LINE_WIDTH_MM", BASE_LINE_WIDTH_MM),
         ("FILAMENT_DIAMETER_MM", FILAMENT_DIAMETER_MM),
         ("WALL_LAYERS_THICK", WALL_LAYERS_THICK),
+        ("SCAN_SPEED_MM_S", SCAN_SPEED_MM_S),
     ):
         require_positive(name, value)
 
@@ -196,6 +207,19 @@ def validate_settings():
         raise ValueError('WALL_PRINT_DIRECTION must be "positive" or "negative".')
     if WALL_APPROACH_CLEARANCE_MM < 0 or SCAN_Z_LIFT_MM < 0 or SCAN_SETTLE_SECONDS < 0:
         raise ValueError("Wall-approach clearance, scan lift, and settle time cannot be negative.")
+
+    for name, value in (
+        ("SCAN_X_LEFTMOST_MM", SCAN_X_LEFTMOST_MM),
+        ("SCAN_X_RIGHTMOST_MM", SCAN_X_RIGHTMOST_MM),
+        ("SCAN_Y_FRONTMOST_MM", SCAN_Y_FRONTMOST_MM),
+        ("SCAN_Y_BACKMOST_MM", SCAN_Y_BACKMOST_MM),
+    ):
+        if value < 0:
+            raise ValueError("{} cannot be negative.".format(name))
+    if not 0 <= SCAN_X_LEFTMOST_MM < SCAN_X_RIGHTMOST_MM <= BUILD_PLATE_SIZE_MM[0]:
+        raise ValueError("X scan boundaries must be ordered and inside BUILD_PLATE_SIZE_MM.")
+    if not 0 <= SCAN_Y_FRONTMOST_MM < SCAN_Y_BACKMOST_MM <= BUILD_PLATE_SIZE_MM[1]:
+        raise ValueError("Y scan boundaries must be ordered and inside BUILD_PLATE_SIZE_MM.")
 
     wall_track_width = WALL_SIZE_MM[1] / WALL_LAYERS_THICK
     if wall_track_width < NOZZLE_DIAMETER_MM * 0.65:
@@ -345,30 +369,38 @@ def print_wall_layer(gcode, box, z, layer_height, track_width):
 
 
 def scan_after_wall_layer(gcode, box, wall_top_z):
-    """Make one non-extruding, wall-parallel scan sweep across the base."""
+    """Move to the nearest scan end, then sweep to the opposite end with no E."""
     if not ENABLE_LAYER_SCAN:
         return
 
     orientation = WALL_ORIENTATION.lower()
     positive = WALL_PRINT_DIRECTION.lower() == "positive"
     scan_z = wall_top_z + SCAN_Z_LIFT_MM
-    gcode.comment("TYPE:SCAN (non-extruding, parallel to wall)")
+    gcode.comment("TYPE:SCAN (non-extruding: current position -> near end -> far end)")
     gcode.travel(z=scan_z, speed_mm_s=TRAVEL_SPEED_MM_S)
 
     if orientation == "x":
-        low, high = box["base_x0"], box["base_x1"]
-        start_x, end_x = (low, high) if positive else (high, low)
+        # +X wall printing ends near the right scan boundary; -X ends near left.
+        near_x, far_x = (
+            (SCAN_X_RIGHTMOST_MM, SCAN_X_LEFTMOST_MM)
+            if positive
+            else (SCAN_X_LEFTMOST_MM, SCAN_X_RIGHTMOST_MM)
+        )
         scan_y = box["center_y"] + SCAN_CROSS_AXIS_OFFSET_MM
-        gcode.travel(x=start_x, y=scan_y, speed_mm_s=TRAVEL_SPEED_MM_S)
+        gcode.travel(x=near_x, y=scan_y, speed_mm_s=SCAN_SPEED_MM_S)
         gcode.dwell(SCAN_SETTLE_SECONDS)
-        gcode.travel(x=end_x, y=scan_y, speed_mm_s=SCAN_SPEED_MM_S)
+        gcode.travel(x=far_x, y=scan_y, speed_mm_s=SCAN_SPEED_MM_S)
     else:
-        low, high = box["base_y0"], box["base_y1"]
-        start_y, end_y = (low, high) if positive else (high, low)
+        # +Y wall printing ends near the back scan boundary; -Y ends near front.
+        near_y, far_y = (
+            (SCAN_Y_BACKMOST_MM, SCAN_Y_FRONTMOST_MM)
+            if positive
+            else (SCAN_Y_FRONTMOST_MM, SCAN_Y_BACKMOST_MM)
+        )
         scan_x = box["center_x"] + SCAN_CROSS_AXIS_OFFSET_MM
-        gcode.travel(x=scan_x, y=start_y, speed_mm_s=TRAVEL_SPEED_MM_S)
+        gcode.travel(x=scan_x, y=near_y, speed_mm_s=SCAN_SPEED_MM_S)
         gcode.dwell(SCAN_SETTLE_SECONDS)
-        gcode.travel(x=scan_x, y=end_y, speed_mm_s=SCAN_SPEED_MM_S)
+        gcode.travel(x=scan_x, y=far_y, speed_mm_s=SCAN_SPEED_MM_S)
     gcode.dwell(SCAN_SETTLE_SECONDS)
 
 
@@ -388,6 +420,14 @@ def generate_gcode():
     gcode.comment("Wall orientation: {}; one-way extrusion: {}".format(WALL_ORIENTATION, WALL_PRINT_DIRECTION))
     gcode.comment("Wall tracks: {}; individual track width: {} mm".format(WALL_LAYERS_THICK, fmt(wall_track_width)))
     gcode.comment(
+        "Scan boundaries mm: X [{}..{}], Y [{}..{}]".format(
+            SCAN_X_LEFTMOST_MM,
+            SCAN_X_RIGHTMOST_MM,
+            SCAN_Y_FRONTMOST_MM,
+            SCAN_Y_BACKMOST_MM,
+        )
+    )
+    gcode.comment(
         "Placement offset mm: [{}, {}]".format(
             PLACEMENT_OFFSET_X_MM,
             PLACEMENT_OFFSET_Y_MM,
@@ -396,9 +436,9 @@ def generate_gcode():
     gcode.add("G21 ; millimetres")
     gcode.add("G90 ; absolute X/Y/Z coordinates")
     gcode.add("M83 ; relative extrusion")
+    gcode.comment("No G28: printer must already be homed and using these absolute coordinates")
     gcode.add("M140 S{} ; start heating bed".format(BED_TEMPERATURE_C))
     gcode.add("M104 S{} ; start heating nozzle".format(EXTRUDER_TEMPERATURE_C))
-    gcode.add("G28 ; home all axes")
     gcode.add("M190 S{} ; wait for bed temperature".format(BED_TEMPERATURE_C))
     gcode.add("M109 S{} ; wait for nozzle temperature".format(EXTRUDER_TEMPERATURE_C))
     gcode.add("G92 E0")
