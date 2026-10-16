@@ -12,11 +12,11 @@ commands.  It deliberately uses no third-party Python libraries.
 # ============================== USER SETTINGS ==============================
 
 # Dimensions are [X length, Y width, Z height] in millimetres.
-BASE_SIZE_MM = [20.0, 10.0, 1.0]
+BASE_SIZE_MM = [60, 20, 0.25]
 
 # Wall dimensions are [length along its orientation, thickness, height].
 # Wall height starts at the top of the base; it is not the total print height.
-WALL_SIZE_MM = [18.0, 1.0, 20.0]
+WALL_SIZE_MM = [50, 0.5, 100]
 
 # "x" makes the wall run left-to-right.  "y" rotates it 90 degrees.
 WALL_ORIENTATION = "x"
@@ -24,7 +24,7 @@ WALL_ORIENTATION = "x"
 # Number of parallel deposited tracks across WALL_SIZE_MM[1].  This is the
 # "layers thick" setting.  The tracks are spread across the requested wall
 # thickness, so changing it does not change the outside wall dimensions.
-WALL_LAYERS_THICK = 2
+WALL_LAYERS_THICK = 1
 
 # "positive" means +X (left-to-right) for an X wall, or +Y for a Y wall.
 # "negative" reverses that direction.  Every wall track extrudes only in this
@@ -33,18 +33,18 @@ WALL_PRINT_DIRECTION = "positive"
 
 # Build plate dimensions and placement. An offset of [0, 0] centers the base
 # on a 220 x 220 mm plate. Positive X/Y moves the entire print accordingly.
-BUILD_PLATE_SIZE_MM = [220.0, 220.0]
-PLACEMENT_OFFSET_X_MM = 0.0
-PLACEMENT_OFFSET_Y_MM = 0.0
+BUILD_PLATE_SIZE_MM = [90, 150]
+PLACEMENT_OFFSET_X_MM = -15
+PLACEMENT_OFFSET_Y_MM = 90
 
 # Global scan boundaries. These are absolute machine coordinates, not offsets.
 # They default to the non-negative 0..220 mm plate range. Values must remain
 # inside BUILD_PLATE_SIZE_MM. The scan goes to the closer end first, then
 # sweeps to the opposite end after every wall layer.
 SCAN_X_LEFTMOST_MM = 0.0
-SCAN_X_RIGHTMOST_MM = 220.0
+SCAN_X_RIGHTMOST_MM = 90
 SCAN_Y_FRONTMOST_MM = 0.0
-SCAN_Y_BACKMOST_MM = 220.0
+SCAN_Y_BACKMOST_MM = 150
 
 # Temperatures: M190 waits for the bed and M109 waits for the nozzle.
 BED_TEMPERATURE_C = 60
