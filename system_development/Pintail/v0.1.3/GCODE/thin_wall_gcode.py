@@ -12,11 +12,11 @@ commands.  It deliberately uses no third-party Python libraries.
 # ============================== USER SETTINGS ==============================
 
 # Dimensions are [X length, Y width, Z height] in millimetres.
-BASE_SIZE_MM = [60, 20, 0.25]
+BASE_SIZE_MM = [20.0, 10.0, 1.0]
 
 # Wall dimensions are [length along its orientation, thickness, height].
 # Wall height starts at the top of the base; it is not the total print height.
-WALL_SIZE_MM = [50, 0.5, 100]
+WALL_SIZE_MM = [18.0, 1.0, 20.0]
 
 # "x" makes the wall run left-to-right.  "y" rotates it 90 degrees.
 WALL_ORIENTATION = "x"
@@ -24,7 +24,7 @@ WALL_ORIENTATION = "x"
 # Number of parallel deposited tracks across WALL_SIZE_MM[1].  This is the
 # "layers thick" setting.  The tracks are spread across the requested wall
 # thickness, so changing it does not change the outside wall dimensions.
-WALL_LAYERS_THICK = 1
+WALL_LAYERS_THICK = 2
 
 # "positive" means +X (left-to-right) for an X wall, or +Y for a Y wall.
 # "negative" reverses that direction.  Every wall track extrudes only in this
@@ -33,18 +33,18 @@ WALL_PRINT_DIRECTION = "positive"
 
 # Build plate dimensions and placement. An offset of [0, 0] centers the base
 # on a 220 x 220 mm plate. Positive X/Y moves the entire print accordingly.
-BUILD_PLATE_SIZE_MM = [90, 150]
-PLACEMENT_OFFSET_X_MM = -15
-PLACEMENT_OFFSET_Y_MM = 90
+BUILD_PLATE_SIZE_MM = [220.0, 220.0]
+PLACEMENT_OFFSET_X_MM = 0.0
+PLACEMENT_OFFSET_Y_MM = 0.0
 
 # Global scan boundaries. These are absolute machine coordinates, not offsets.
 # They default to the non-negative 0..220 mm plate range. Values must remain
 # inside BUILD_PLATE_SIZE_MM. The scan goes to the closer end first, then
 # sweeps to the opposite end after every wall layer.
 SCAN_X_LEFTMOST_MM = 0.0
-SCAN_X_RIGHTMOST_MM = 90
+SCAN_X_RIGHTMOST_MM = 220.0
 SCAN_Y_FRONTMOST_MM = 0.0
-SCAN_Y_BACKMOST_MM = 150
+SCAN_Y_BACKMOST_MM = 220.0
 
 # Temperatures: M190 waits for the bed and M109 waits for the nozzle.
 BED_TEMPERATURE_C = 60
@@ -72,7 +72,7 @@ ENABLE_LAYER_SCAN = True
 SCAN_SPEED_MM_S = 15.0
 SCAN_Z_LIFT_MM = 2.0
 SCAN_CROSS_AXIS_OFFSET_MM = 0.0  # 0 = scan directly over the wall centreline
-SCAN_SETTLE_SECONDS = 0.0        # Optional dwell before and after each sweep
+SCAN_SETTLE_SECONDS = 0.0        # Optional dwell only after the far end is reached
 
 OUTPUT_FILE = "thin_wall.gcode"
 
@@ -132,7 +132,7 @@ def line_positions(start, end, spacing):
 
 
 def extrusion_amount(distance, line_width, layer_height):
-    """Return relative filament length for a rectangular deposited bead."""
+    """Return filament length for one rectangular deposited bead."""
     filament_area = PI * (FILAMENT_DIAMETER_MM / 2.0) ** 2
     deposited_volume = distance * line_width * layer_height
     return deposited_volume / filament_area * EXTRUSION_MULTIPLIER
@@ -141,6 +141,7 @@ def extrusion_amount(distance, line_width, layer_height):
 class GCode:
     def __init__(self):
         self.lines = []
+        self.extruder_position = 0.0
 
     def add(self, line):
         self.lines.append(line)
@@ -162,11 +163,12 @@ class GCode:
 
     def extrude_to(self, x, y, distance, line_width, layer_height, speed_mm_s):
         amount = extrusion_amount(distance, line_width, layer_height)
+        self.extruder_position += amount
         self.add(
             "G1 X{} Y{} E{} F{}".format(
                 fmt(x),
                 fmt(y),
-                fmt(amount, 5),
+                fmt(self.extruder_position, 5),
                 fmt(speed_mm_s * 60.0, 0),
             )
         )
@@ -174,6 +176,9 @@ class GCode:
     def dwell(self, seconds):
         if seconds > 0:
             self.add("G4 P{}".format(int(seconds * 1000.0)))
+
+    def wait_for_moves(self):
+        self.add("M400 ; wait for all queued motion")
 
 
 def validate_settings():
@@ -388,7 +393,6 @@ def scan_after_wall_layer(gcode, box, wall_top_z):
         )
         scan_y = box["center_y"] + SCAN_CROSS_AXIS_OFFSET_MM
         gcode.travel(x=near_x, y=scan_y, speed_mm_s=SCAN_SPEED_MM_S)
-        gcode.dwell(SCAN_SETTLE_SECONDS)
         gcode.travel(x=far_x, y=scan_y, speed_mm_s=SCAN_SPEED_MM_S)
     else:
         # +Y wall printing ends near the back scan boundary; -Y ends near front.
@@ -399,9 +403,10 @@ def scan_after_wall_layer(gcode, box, wall_top_z):
         )
         scan_x = box["center_x"] + SCAN_CROSS_AXIS_OFFSET_MM
         gcode.travel(x=scan_x, y=near_y, speed_mm_s=SCAN_SPEED_MM_S)
-        gcode.dwell(SCAN_SETTLE_SECONDS)
         gcode.travel(x=scan_x, y=far_y, speed_mm_s=SCAN_SPEED_MM_S)
-    gcode.dwell(SCAN_SETTLE_SECONDS)
+    if SCAN_SETTLE_SECONDS > 0:
+        gcode.wait_for_moves()
+        gcode.dwell(SCAN_SETTLE_SECONDS)
 
 
 def generate_gcode():
@@ -435,7 +440,7 @@ def generate_gcode():
     )
     gcode.add("G21 ; millimetres")
     gcode.add("G90 ; absolute X/Y/Z coordinates")
-    gcode.add("M83 ; relative extrusion")
+    gcode.add("M82 ; absolute extrusion coordinates")
     gcode.comment("No G28: printer must already be homed and using these absolute coordinates")
     gcode.add("M140 S{} ; start heating bed".format(BED_TEMPERATURE_C))
     gcode.add("M104 S{} ; start heating nozzle".format(EXTRUDER_TEMPERATURE_C))
