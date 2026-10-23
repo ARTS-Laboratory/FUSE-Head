@@ -65,7 +65,7 @@ NOZZLE_DIAMETER_MM = 0.40
 BASE_LINE_WIDTH_MM = 0.42
 LAYER_HEIGHT_MM = 0.20
 FILAMENT_DIAMETER_MM = 1.75
-EXTRUSION_MULTIPLIER = 1.00
+EXTRUSION_MULTIPLIER = 2.00
 FIRST_LAYER_SPEED_MM_S = 20.0
 PRINT_SPEED_MM_S = 35.0
 TRAVEL_SPEED_MM_S = 150.0
@@ -81,8 +81,8 @@ WALL_APPROACH_CLEARANCE_MM = 0.5
 ENABLE_LAYER_SCAN = True
 SCAN_SPEED_MM_S = 35.0
 SCAN_Z_LIFT_MM = 2.0
-SCAN_CROSS_AXIS_OFFSET_MM = 0.0  # 0 = scan directly over the wall centreline
-SCAN_SETTLE_SECONDS = 0.0        # Optional dwell only after the far end is reached
+SCAN_CROSS_AXIS_OFFSET_MM = -1  # 0 = scan directly over the wall centreline
+SCAN_SETTLE_SECONDS = 5.0        # Optional dwell only after the far end is reached
 
 OUTPUT_FILE = "thin_wall.gcode"
 
@@ -189,6 +189,12 @@ class GCode:
 
     def wait_for_moves(self):
         self.add("M400 ; wait for all queued motion")
+        
+    def set_speed(self, percent_speed):
+        self.add("M220 S{}".format(percent_speed))
+
+    def beep(self):
+        self.add("BEEP")
 
 
 def validate_settings():
@@ -532,7 +538,7 @@ def generate_gcode():
     gcode.add("M190 S{} ; wait for bed temperature".format(BED_TEMPERATURE_C))
     gcode.add("M109 S{} ; wait for nozzle temperature".format(EXTRUDER_TEMPERATURE_C))
     gcode.add("G92 E0")
-
+    gcode.set_speed(200)
     for index, (z, layer_height) in enumerate(base_layers):
         gcode.comment("LAYER:{} TYPE:BASE".format(index))
         speed = FIRST_LAYER_SPEED_MM_S if index == 0 else PRINT_SPEED_MM_S
@@ -541,8 +547,13 @@ def generate_gcode():
     for index, (relative_z, layer_height) in enumerate(wall_layers):
         top_z = BASE_SIZE_MM[2] + relative_z
         gcode.comment("LAYER:{} TYPE:WALL".format(len(base_layers) + index))
+        gcode.set_speed(50)
         print_wall_layer(gcode, box, top_z, layer_height, wall_track_width)
+        gcode.set_speed(200)
+        gcode.beep()
         scan_after_wall_layer(gcode, box, top_z)
+        gcode.beep()
+        gcode.beep()
 
     gcode.comment("End of print")
     gcode.travel(z=BASE_SIZE_MM[2] + WALL_SIZE_MM[2] + 5.0, speed_mm_s=TRAVEL_SPEED_MM_S)
