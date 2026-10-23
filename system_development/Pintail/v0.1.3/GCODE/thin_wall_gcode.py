@@ -12,11 +12,11 @@ commands.  It deliberately uses no third-party Python libraries.
 # ============================== USER SETTINGS ==============================
 
 # Dimensions are [X length, Y width, Z height] in millimetres.
-BASE_SIZE_MM = [20.0, 10.0, 1.0]
+BASE_SIZE_MM = [80.0, 10.0, 0.5]
 
 # Wall dimensions are [length along its orientation, thickness, height].
 # Wall height starts at the top of the base; it is not the total print height.
-WALL_SIZE_MM = [18.0, 1.0, 20.0]
+WALL_SIZE_MM = [40.0, 0.5, 20.0]
 
 # "x" makes the wall run left-to-right.  "y" rotates it 90 degrees.
 WALL_ORIENTATION = "x"
@@ -24,17 +24,27 @@ WALL_ORIENTATION = "x"
 # Number of parallel deposited tracks across WALL_SIZE_MM[1].  This is the
 # "layers thick" setting.  The tracks are spread across the requested wall
 # thickness, so changing it does not change the outside wall dimensions.
-WALL_LAYERS_THICK = 2
+WALL_LAYERS_THICK = 1
+
+# Extra centreline distance at each wall end for measured-length compensation.
+# At 0, WALL_SIZE_MM[0] is the wall's nominal outside length. A positive
+# value extends both ends equally without shifting the wall's centre. Use a
+# positive value only when the wall has room to remain on its base.
+WALL_END_EXTENSION_MM = 0.0
 
 # "positive" means +X (left-to-right) for an X wall, or +Y for a Y wall.
 # "negative" reverses that direction.  Every wall track extrudes only in this
 # direction; all return and cross-wall moves are non-extruding travels.
 WALL_PRINT_DIRECTION = "positive"
 
-# Build plate dimensions and placement. An offset of [0, 0] centers the base
-# on a 220 x 220 mm plate. Positive X/Y moves the entire print accordingly.
-BUILD_PLATE_SIZE_MM = [220.0, 220.0]
-PLACEMENT_OFFSET_X_MM = 0.0
+# Build plate dimensions and placement. The alignment applies to the complete
+# base/wall print. Use "center", "left", or "right" for X; use "center",
+# "front", or "back" for Y. The X/Y offsets are always applied afterward,
+# so they can fine-tune any alignment choice.
+BUILD_PLATE_SIZE_MM = [125.0, 150.0]
+PRINT_ALIGNMENT_X = "center"
+PRINT_ALIGNMENT_Y = "center"
+PLACEMENT_OFFSET_X_MM = 0
 PLACEMENT_OFFSET_Y_MM = 0.0
 
 # Global scan boundaries. These are absolute machine coordinates, not offsets.
@@ -42,9 +52,9 @@ PLACEMENT_OFFSET_Y_MM = 0.0
 # inside BUILD_PLATE_SIZE_MM. The scan goes to the closer end first, then
 # sweeps to the opposite end after every wall layer.
 SCAN_X_LEFTMOST_MM = 0.0
-SCAN_X_RIGHTMOST_MM = 220.0
+SCAN_X_RIGHTMOST_MM = 125.0
 SCAN_Y_FRONTMOST_MM = 0.0
-SCAN_Y_BACKMOST_MM = 220.0
+SCAN_Y_BACKMOST_MM = 150.0
 
 # Temperatures: M190 waits for the bed and M109 waits for the nozzle.
 BED_TEMPERATURE_C = 60
@@ -69,7 +79,7 @@ WALL_APPROACH_CLEARANCE_MM = 0.5
 # scanner/nozzle geometry. The file does not include G28, so home the printer
 # or otherwise establish its absolute coordinate system before starting it.
 ENABLE_LAYER_SCAN = True
-SCAN_SPEED_MM_S = 15.0
+SCAN_SPEED_MM_S = 35.0
 SCAN_Z_LIFT_MM = 2.0
 SCAN_CROSS_AXIS_OFFSET_MM = 0.0  # 0 = scan directly over the wall centreline
 SCAN_SETTLE_SECONDS = 0.0        # Optional dwell only after the far end is reached
@@ -210,6 +220,10 @@ def validate_settings():
         raise ValueError('WALL_ORIENTATION must be "x" or "y".')
     if WALL_PRINT_DIRECTION.lower() not in ("positive", "negative"):
         raise ValueError('WALL_PRINT_DIRECTION must be "positive" or "negative".')
+    if PRINT_ALIGNMENT_X.lower() not in ("center", "left", "right"):
+        raise ValueError('PRINT_ALIGNMENT_X must be "center", "left", or "right".')
+    if PRINT_ALIGNMENT_Y.lower() not in ("center", "front", "back"):
+        raise ValueError('PRINT_ALIGNMENT_Y must be "center", "front", or "back".')
     if WALL_APPROACH_CLEARANCE_MM < 0 or SCAN_Z_LIFT_MM < 0 or SCAN_SETTLE_SECONDS < 0:
         raise ValueError("Wall-approach clearance, scan lift, and settle time cannot be negative.")
 
@@ -237,12 +251,45 @@ def validate_settings():
             "Wall tracks are too wide for this nozzle. Increase WALL_LAYERS_THICK "
             "or reduce WALL_SIZE_MM[1]."
         )
+    if not 0 <= WALL_END_EXTENSION_MM <= wall_track_width / 2.0:
+        raise ValueError(
+            "WALL_END_EXTENSION_MM must be from 0 to half of one wall track width."
+        )
+
+    end_inset = wall_track_width / 2.0 - WALL_END_EXTENSION_MM
+    if WALL_SIZE_MM[0] <= 2.0 * end_inset:
+        raise ValueError(
+            "Wall length is too short for the selected wall track width and end extension."
+        )
+
+
+def aligned_axis_center(plate_length, print_length, alignment, lower_side, upper_side):
+    """Return the print centre for one plate axis before its fine-tune offset."""
+    if alignment == "center":
+        return plate_length / 2.0
+    if alignment == lower_side:
+        return print_length / 2.0
+    if alignment == upper_side:
+        return plate_length - print_length / 2.0
+    raise ValueError("Invalid alignment.")
 
 
 def geometry():
-    """Calculate base and wall bounds, centered on the build plate plus offset."""
-    center_x = BUILD_PLATE_SIZE_MM[0] / 2.0 + PLACEMENT_OFFSET_X_MM
-    center_y = BUILD_PLATE_SIZE_MM[1] / 2.0 + PLACEMENT_OFFSET_Y_MM
+    """Calculate base/wall bounds, keeping their centre points identical."""
+    center_x = aligned_axis_center(
+        BUILD_PLATE_SIZE_MM[0],
+        BASE_SIZE_MM[0],
+        PRINT_ALIGNMENT_X.lower(),
+        "left",
+        "right",
+    ) + PLACEMENT_OFFSET_X_MM
+    center_y = aligned_axis_center(
+        BUILD_PLATE_SIZE_MM[1],
+        BASE_SIZE_MM[1],
+        PRINT_ALIGNMENT_Y.lower(),
+        "front",
+        "back",
+    ) + PLACEMENT_OFFSET_Y_MM
 
     base_x0 = center_x - BASE_SIZE_MM[0] / 2.0
     base_x1 = center_x + BASE_SIZE_MM[0] / 2.0
@@ -294,6 +341,36 @@ def validate_geometry(box):
         raise ValueError(
             "The wall does not fit on the base. For a Y-oriented 18 mm wall, "
             "increase BASE_SIZE_MM[1] to at least 18 mm."
+        )
+
+    # Positive end compensation expands the deposited wall footprint beyond
+    # its nominal box along its length, so make sure that footprint stays on
+    # the base as well as on the plate.
+    if WALL_ORIENTATION.lower() == "x":
+        actual_wall_x0 = box["wall_x0"] - WALL_END_EXTENSION_MM
+        actual_wall_x1 = box["wall_x1"] + WALL_END_EXTENSION_MM
+        actual_wall_y0, actual_wall_y1 = box["wall_y0"], box["wall_y1"]
+    else:
+        actual_wall_x0, actual_wall_x1 = box["wall_x0"], box["wall_x1"]
+        actual_wall_y0 = box["wall_y0"] - WALL_END_EXTENSION_MM
+        actual_wall_y1 = box["wall_y1"] + WALL_END_EXTENSION_MM
+
+    inside_build_plate(
+        "Compensated wall",
+        actual_wall_x0,
+        actual_wall_x1,
+        actual_wall_y0,
+        actual_wall_y1,
+    )
+    if (
+        actual_wall_x0 < box["base_x0"] - EPSILON
+        or actual_wall_x1 > box["base_x1"] + EPSILON
+        or actual_wall_y0 < box["base_y0"] - EPSILON
+        or actual_wall_y1 > box["base_y1"] + EPSILON
+    ):
+        raise ValueError(
+            "WALL_END_EXTENSION_MM makes the deposited wall extend beyond the base. "
+            "Reduce it or leave more wall-to-base margin."
         )
 
     if ENABLE_LAYER_SCAN:
@@ -352,9 +429,13 @@ def print_wall_layer(gcode, box, z, layer_height, track_width):
     orientation = WALL_ORIENTATION.lower()
     positive = WALL_PRINT_DIRECTION.lower() == "positive"
     track_positions = wall_track_positions(box, track_width)
+    # Inset the centreline by half the track width so the deposited wall keeps
+    # its requested outside length. Optional compensation extends both ends
+    # symmetrically, preserving the wall's centre point.
+    end_inset = track_width / 2.0 - WALL_END_EXTENSION_MM
 
     if orientation == "x":
-        low, high = box["wall_x0"] + track_width / 2.0, box["wall_x1"] - track_width / 2.0
+        low, high = box["wall_x0"] + end_inset, box["wall_x1"] - end_inset
         start_x, end_x = (low, high) if positive else (high, low)
         gcode.travel(z=z + WALL_APPROACH_CLEARANCE_MM, speed_mm_s=TRAVEL_SPEED_MM_S)
         gcode.travel(x=start_x, y=track_positions[0], speed_mm_s=TRAVEL_SPEED_MM_S)
@@ -363,7 +444,7 @@ def print_wall_layer(gcode, box, z, layer_height, track_width):
             gcode.travel(x=start_x, y=y, speed_mm_s=TRAVEL_SPEED_MM_S)
             gcode.extrude_to(end_x, y, abs(end_x - start_x), track_width, layer_height, PRINT_SPEED_MM_S)
     else:
-        low, high = box["wall_y0"] + track_width / 2.0, box["wall_y1"] - track_width / 2.0
+        low, high = box["wall_y0"] + end_inset, box["wall_y1"] - end_inset
         start_y, end_y = (low, high) if positive else (high, low)
         gcode.travel(z=z + WALL_APPROACH_CLEARANCE_MM, speed_mm_s=TRAVEL_SPEED_MM_S)
         gcode.travel(x=track_positions[0], y=start_y, speed_mm_s=TRAVEL_SPEED_MM_S)
@@ -424,18 +505,22 @@ def generate_gcode():
     gcode.comment("Wall mm [length, thickness, height]: {}".format(WALL_SIZE_MM))
     gcode.comment("Wall orientation: {}; one-way extrusion: {}".format(WALL_ORIENTATION, WALL_PRINT_DIRECTION))
     gcode.comment("Wall tracks: {}; individual track width: {} mm".format(WALL_LAYERS_THICK, fmt(wall_track_width)))
+    gcode.comment("Wall end extension: {} mm per end".format(fmt(WALL_END_EXTENSION_MM)))
+    gcode.comment(
+        "Print alignment: X={}, Y={}; offset mm: [{}, {}]".format(
+            PRINT_ALIGNMENT_X,
+            PRINT_ALIGNMENT_Y,
+            PLACEMENT_OFFSET_X_MM,
+            PLACEMENT_OFFSET_Y_MM,
+        )
+    )
+    gcode.comment("Base and wall centre mm: [{}, {}]".format(fmt(box["center_x"]), fmt(box["center_y"])))
     gcode.comment(
         "Scan boundaries mm: X [{}..{}], Y [{}..{}]".format(
             SCAN_X_LEFTMOST_MM,
             SCAN_X_RIGHTMOST_MM,
             SCAN_Y_FRONTMOST_MM,
             SCAN_Y_BACKMOST_MM,
-        )
-    )
-    gcode.comment(
-        "Placement offset mm: [{}, {}]".format(
-            PLACEMENT_OFFSET_X_MM,
-            PLACEMENT_OFFSET_Y_MM,
         )
     )
     gcode.add("G21 ; millimetres")
